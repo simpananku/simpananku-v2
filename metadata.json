@@ -1,0 +1,8 @@
+{
+  "name": "SIMPANANKU V2",
+  "description": "Sistem Pengelolaan Simpanan Tabungan Syariah, Gadai Syariah, dan Kredit Barang dengan multi-role Admin, Teller, \u0026 Nasabah.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
