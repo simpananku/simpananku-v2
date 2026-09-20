@@ -22,7 +22,8 @@ class PawnController extends Controller
 
     public function index(Request $request)
     {
-        $query = PawnPledge::orderBy('created_at', 'desc');
+        $query = PawnPledge::withSum(['transactions as paid_ujrah_total' => fn ($q) => $q->where('type', 'biaya_ujrah')], 'amount')->orderBy('created_at', 'desc');
+        if ($request->user()->role === 'nasabah') $query->where('member_number', $request->user()->member_id);
 
         if ($request->filled('member_number')) {
             $query->where('member_number', $request->member_number);

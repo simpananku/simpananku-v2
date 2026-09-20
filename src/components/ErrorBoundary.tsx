@@ -31,11 +31,6 @@ export function ErrorBoundary({ children }: ErrorBoundaryProps) {
     };
   }, []);
 
-  const handleReset = () => {
-    localStorage.clear();
-    window.location.reload();
-  };
-
   if (hasError) {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4 font-sans">
@@ -47,7 +42,7 @@ export function ErrorBoundary({ children }: ErrorBoundaryProps) {
             SIMPANANKU
           </h1>
           <p className="text-xs text-slate-400 mb-6 leading-relaxed">
-            {errorMessage || 'Sistem mendeteksi pembaruan data sesi. Silakan muat ulang atau reset data lokal.'}
+            {errorMessage || 'Terjadi kesalahan. Silakan muat ulang halaman.'}
           </p>
           <div className="space-y-2">
             <button
@@ -56,13 +51,6 @@ export function ErrorBoundary({ children }: ErrorBoundaryProps) {
             >
               <RefreshCw className="w-4 h-4" />
               Muat Ulang Halaman
-            </button>
-            <button
-              onClick={handleReset}
-              className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors"
-            >
-              <Home className="w-4 h-4" />
-              Reset Data Sesi & Ke Halaman Awal
             </button>
           </div>
         </div>

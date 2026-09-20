@@ -1,4 +1,6 @@
 # 📚 PANDUAN LENGKAP EKSEKUSI & DEPLOYMENT SISTEM SIMPANANKU
+
+> Panduan terkini untuk setup lokal dan deployment ada di [DEPLOYMENT.md](DEPLOYMENT.md). Ikuti panduan tersebut untuk konfigurasi session, database, migrasi, dan akun admin awal.
 ### Sistem Pengelolaan Simpanan Tabungan, Gadai Syariah (Rahn), & Kredit Barang (Murabahah)
 Arsitektur: **Modern Frontend (React 19 + Vite + Tailwind)** & **Backend API (Laravel 13 AI-Native)**
 

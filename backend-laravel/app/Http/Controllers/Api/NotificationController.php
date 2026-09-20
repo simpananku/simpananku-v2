@@ -11,6 +11,7 @@ class NotificationController extends Controller
     public function index(Request $request)
     {
         $query = Notification::orderBy('created_at', 'desc');
+        if ($request->user()->role === 'nasabah') $query->where('target_member_number', $request->user()->member_id);
 
         if ($request->filled('member_number')) {
             $mem = $request->member_number;
@@ -26,9 +27,10 @@ class NotificationController extends Controller
         ]);
     }
 
-    public function markAsRead($id)
+    public function markAsRead(Request $request, $id)
     {
         $notif = Notification::findOrFail($id);
+        abort_if($request->user()->role === 'nasabah' && $request->user()->member_id !== $notif->target_member_number, 403);
         $notif->read = true;
         $notif->save();
 
@@ -41,6 +43,7 @@ class NotificationController extends Controller
     public function markAllAsRead(Request $request)
     {
         $query = Notification::query();
+        if ($request->user()->role === 'nasabah') $query->where('target_member_number', $request->user()->member_id);
         if ($request->filled('member_number')) {
             $query->where('target_member_number', $request->member_number);
         }

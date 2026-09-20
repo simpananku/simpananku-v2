@@ -1,5 +1,7 @@
 # SIMPANANKU - Backend API Laravel 13 AI-Native
 
+> Untuk setup terbaru, konfigurasi session, migrasi, dan deployment, gunakan [DEPLOYMENT.md](../DEPLOYMENT.md). Instruksi lama di bawah ini mungkin belum mencerminkan perubahan autentikasi dan database.
+
 Backend RESTful API berbasis **Laravel 13** dan berarsitektur **AI-Native** untuk mendukung ekosistem **SIMPANANKU**: Sistem Pengelolaan Simpanan Tabungan Syariah, Gadai Syariah (*Rahn*), dan Kredit Barang Syariah (*Murabahah Bi Tsaman 'Aajil*) tanpa bunga/riba.
 
 ---

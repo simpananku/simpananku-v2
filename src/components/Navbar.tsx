@@ -11,8 +11,8 @@ import {
 } from 'lucide-react';
 import { User, NotificationItem, UserRole } from '../types';
 import { formatDateIndo } from '../services/generator';
+import { ApiClient } from '../services/api';
 import simpanankuLogo from '../assets/images/simpananku.jpg';
-import { ApiStatusBadge } from './ApiStatusBadge';
 
 interface NavbarProps {
   currentUser: User;
@@ -43,8 +43,13 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const unreadCount = notifs.filter((n) => !n.read).length;
 
-  const markAllAsRead = () => {
-    setNotifs((prev) => prev.map((n) => ({ ...n, read: true })));
+  const markAllAsRead = async () => {
+    try {
+      await ApiClient.markAllNotificationsRead();
+      await onRefreshData?.();
+    } catch (error) {
+      console.error('Gagal menandai notifikasi:', error);
+    }
   };
 
   const getRoleBadge = (role: UserRole) => {
@@ -108,25 +113,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Right Navigation & Tools */}
           <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-            {/* Live Backend Laravel 13 Status Badge */}
-            <ApiStatusBadge onDataRefreshNeeded={onRefreshData} />
-
-            {/* Laravel 13 Architecture Shortcut */}
-            <button
-              id="btn-laravel-architecture"
-              onClick={onOpenLaravelCode}
-              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all shrink-0 cursor-pointer ${
-                activeView === 'laravel-code'
-                  ? 'bg-amber-400 text-emerald-950 border-amber-300 shadow-sm'
-                  : 'bg-emerald-800/80 hover:bg-emerald-700 text-emerald-100 border-emerald-700'
-              }`}
-              title="Lihat Arsitektur Laravel 13, Migrasi, Model & Relasi"
-            >
-              <Code2 className="w-4 h-4 text-amber-300 shrink-0" />
-              <span className="hidden sm:inline">Struktur </span>
-              <span className="text-[11px] sm:text-xs">Laravel 13</span>
-            </button>
-
             {/* Real-time Notification Popover (Disembunyikan khusus untuk Nasabah) */}
             {currentUser.role !== 'nasabah' && (
               <div className="relative">

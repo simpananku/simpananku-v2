@@ -23,6 +23,7 @@ class CommodityFinancingController extends Controller
     public function index(Request $request)
     {
         $query = CommodityFinancing::orderBy('created_at', 'desc');
+        if ($request->user()->role === 'nasabah') $query->where('member_number', $request->user()->member_id);
 
         if ($request->filled('member_number')) {
             $query->where('member_number', $request->member_number);

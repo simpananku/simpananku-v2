@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   Eye, 
   EyeOff, 
@@ -33,13 +33,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    ApiClient.checkHealth()
-      .then((res) => setBackendOnline(res.connected))
-      .catch(() => setBackendOnline(false));
-  }, []);
 
   const handleManualLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,81 +42,16 @@ export const LoginView: React.FC<LoginViewProps> = ({
     const searchVal = email.trim();
 
     try {
-      // 1. Utamakan Login langsung ke Laravel 13 API Backend
       const apiResult = await ApiClient.login(searchVal, password);
       if (apiResult.success && apiResult.user) {
         onLoginSuccess(apiResult.user);
         return;
       }
     } catch (apiErr: any) {
-      console.warn('API login check:', apiErr.message);
-      if (
-        apiErr.message &&
-        !apiErr.message.includes('Gagal menghubungi') &&
-        !apiErr.message.includes('fetch') &&
-        !apiErr.message.includes('status 5')
-      ) {
-        setError(apiErr.message);
-        setIsLoading(false);
-        return;
-      }
-    }
-
-    // 2. Fallback ke database akun lokal jika offline / jaringan terputus
-    const lowerVal = searchVal.toLowerCase();
-    const altSearchVal = lowerVal.endsWith('@simpananku.id')
-      ? lowerVal.replace('@simpananku.id', '@simpananku.my.id')
-      : lowerVal.endsWith('@simpananku.my.id')
-      ? lowerVal.replace('@simpananku.my.id', '@simpananku.id')
-      : lowerVal;
-
-    const user = users.find(
-      (u) =>
-        u.email.toLowerCase() === lowerVal ||
-        u.email.toLowerCase() === altSearchVal ||
-        (u.memberId && u.memberId.toLowerCase() === lowerVal) ||
-        u.phone.replace(/\D/g, '') === lowerVal.replace(/\D/g, '') ||
-        u.role.toLowerCase() === lowerVal
-    );
-
-    if (user) {
-      if (user.password && password && user.password !== password) {
-        setError('Kata sandi yang Anda masukkan salah. Silakan periksa kembali.');
-        setIsLoading(false);
-        return;
-      }
-      onLoginSuccess(user);
-    } else {
-      setError('Email atau identitas pengguna tidak ditemukan dalam database.');
+      setError(apiErr.message || 'Gagal masuk. Periksa koneksi dan coba lagi.');
+    } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleQuickLogin = async (role: 'admin' | 'teller' | 'nasabah') => {
-    setIsLoading(true);
-    setError(null);
-    const credentials = {
-      admin: { email: 'admin@simpananku.my.id', pass: 'admin123' },
-      teller: { email: 'teller@simpananku.my.id', pass: 'teller123' },
-      nasabah: { email: 'nasabah@simpananku.my.id', pass: 'nasabah123' },
-    };
-
-    const target = credentials[role];
-    try {
-      const res = await ApiClient.login(target.email, target.pass);
-      if (res.success && res.user) {
-        onLoginSuccess(res.user);
-        return;
-      }
-    } catch (err) {
-      console.warn('Quick login fallback to local user:', err);
-    }
-
-    const localUser = users.find((u) => u.role === role) || users[0];
-    if (localUser) {
-      onLoginSuccess(localUser);
-    }
-    setIsLoading(false);
   };
 
   return (
@@ -193,18 +121,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 Login Sistem Informasi Simpananku
               </p>
 
-              {/* Status Koneksi Backend API */}
-              <div className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-xs">
-                <span className="relative flex h-2 w-2">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${backendOnline !== false ? 'bg-emerald-400' : 'bg-amber-400'} opacity-75`} />
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${backendOnline !== false ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                </span>
-                <Server className="w-3 h-3 text-emerald-600" />
-                <span>API Backend Laravel 13:</span>
-                <span className="font-mono text-[10px] text-emerald-950">
-                  {backendOnline !== false ? 'Terhubung Aktif' : 'Menghubungkan...'}
-                </span>
-              </div>
             </div>
 
             {/* Error Notification */}
@@ -285,46 +201,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
               </button>
             </form>
 
-            {/* Quick Demo Access Buttons */}
-            <div className="mt-6 pt-5 border-t border-slate-200">
-              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center mb-3">
-                Masuk Cepat Demo (Autentikasi API Otomatis)
-              </p>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  disabled={isLoading}
-                  onClick={() => handleQuickLogin('admin')}
-                  className="p-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-900 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
-                >
-                  <ShieldCheck className="w-4 h-4 text-emerald-700" />
-                  <span className="text-[11px] font-bold">Admin</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isLoading}
-                  onClick={() => handleQuickLogin('teller')}
-                  className="p-2.5 rounded-xl bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-900 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
-                >
-                  <UserCheck className="w-4 h-4 text-teal-700" />
-                  <span className="text-[11px] font-bold">Teller</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isLoading}
-                  onClick={() => handleQuickLogin('nasabah')}
-                  className="p-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
-                >
-                  <div className="w-4 h-4 rounded-full bg-amber-500 text-white flex items-center justify-center text-[9px] font-black">
-                    AG
-                  </div>
-                  <span className="text-[11px] font-bold">Nasabah</span>
-                </button>
-              </div>
-            </div>
-
             {/* Bottom Institutional Disclaimer */}
             <div className="mt-6 text-center text-[11px] text-slate-400">
               <p>Layanan dan produk kami hadir secara eksklusif hanya untuk anggota terdaftar dan tidak tersedia untuk masyarakat umum</p>
@@ -338,4 +214,3 @@ export const LoginView: React.FC<LoginViewProps> = ({
     </div>
   );
 };
-

@@ -16,7 +16,6 @@ import {
 } from '../types';
 
 // Konfigurasi Base URL dengan smart fallback (Direct API & Proxy dev server)
-const REMOTE_API_URL = 'https://api.simpananku.my.id/api/v1';
 const PROXY_API_URL = '/api/v1';
 
 export interface ApiHealthStatus {
@@ -30,7 +29,6 @@ export interface ApiHealthStatus {
 }
 
 export class ApiClient {
-  private static token: string | null = localStorage.getItem('simpananku_token');
   private static activeBaseUrl: string = import.meta.env.VITE_API_URL || PROXY_API_URL;
 
   public static getBaseUrl(): string {
@@ -41,92 +39,41 @@ export class ApiClient {
     this.activeBaseUrl = url;
   }
 
-  public static setToken(token: string | null) {
-    this.token = token;
-    if (token) {
-      localStorage.setItem('simpananku_token', token);
-    } else {
-      localStorage.removeItem('simpananku_token');
-    }
+  private static csrfToken(): string | null {
+    const value = document.cookie.split('; ').find(part => part.startsWith('XSRF-TOKEN='));
+    return value ? decodeURIComponent(value.substring('XSRF-TOKEN='.length)) : null;
   }
 
-  public static getToken(): string | null {
-    return this.token || localStorage.getItem('simpananku_token');
+  private static async ensureCsrf(): Promise<void> {
+    if (this.csrfToken()) return;
+    const origin = new URL(this.activeBaseUrl, window.location.origin).origin;
+    const response = await fetch(`${origin}/sanctum/csrf-cookie`, { credentials: 'include', headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error('Gagal memulai sesi aman. Periksa cookie dan CORS.');
   }
 
   /**
    * Internal fetch method with automatic fallback between Proxy and Direct URL
    */
   public static async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    if (options.method && options.method.toUpperCase() !== 'GET') await this.ensureCsrf();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       ...(options.headers as Record<string, string>),
     };
 
-    let token = this.getToken();
-    if (!token && !endpoint.startsWith('/auth') && !endpoint.startsWith('/dashboard/stats') && !endpoint.startsWith('/savings-products') && !endpoint.startsWith('/ai/')) {
-      try {
-        const authRes = await fetch(`${this.activeBaseUrl}/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ email: 'admin@simpananku.my.id', password: 'admin123' }),
-        }).then((r) => r.json()).catch(() => null);
-
-        if (authRes?.token) {
-          this.setToken(authRes.token);
-          token = authRes.token;
-        }
-      } catch {
-        // ignore and proceed
+    const csrf = this.csrfToken();
+    if (csrf && options.method && options.method.toUpperCase() !== 'GET') headers['X-XSRF-TOKEN'] = csrf;
+    const response = await fetch(`${this.activeBaseUrl}${endpoint}`, { ...options, headers, credentials: 'include' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (response.status === 401 && endpoint !== '/auth/login') {
+        window.dispatchEvent(new Event('simpananku:unauthorized'));
       }
+      const details = data.errors ? Object.values(data.errors).flat().join(' ') : '';
+      throw new Error(details || data.message || `Permintaan gagal (${response.status})`);
     }
-
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    // Coba request dengan activeBaseUrl terlebih dahulu
-    try {
-      const url = `${this.activeBaseUrl}${endpoint}`;
-      const response = await fetch(url, {
-        ...options,
-        headers,
-      });
-
-      // Handle common Laravel response
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.message || `Request failed with status ${response.status}`);
-      }
-
-      return data as T;
-    } catch (err: any) {
-      // Jika terjadi kesalahan fetch (misal CORS pada direct URL), coba fallback ke proxy atau remote URL
-      const isNetworkError = err.name === 'TypeError' || err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError');
-      if (isNetworkError) {
-        const fallbackUrl = this.activeBaseUrl === PROXY_API_URL ? REMOTE_API_URL : PROXY_API_URL;
-        console.warn(`[ApiClient] Request ke ${this.activeBaseUrl}${endpoint} gagal, mencoba fallback ke ${fallbackUrl}${endpoint}...`);
-        
-        try {
-          const fallbackResponse = await fetch(`${fallbackUrl}${endpoint}`, {
-            ...options,
-            headers,
-          });
-          const fallbackData = await fallbackResponse.json().catch(() => ({}));
-          if (!fallbackResponse.ok) {
-            throw new Error(fallbackData.message || `Fallback failed with status ${fallbackResponse.status}`);
-          }
-          // Jika fallback berhasil, perbarui activeBaseUrl untuk request selanjutnya
-          this.activeBaseUrl = fallbackUrl;
-          return fallbackData as T;
-        } catch (fallbackErr: any) {
-          throw new Error(err.message || 'Gagal menghubungi server API Backend Laravel.');
-        }
-      }
-
-      throw err;
-    }
+    return data as T;
   }
 
   // ==========================================
@@ -139,7 +86,7 @@ export class ApiClient {
       const latencyMs = Math.round(performance.now() - start);
       return {
         connected: true,
-        apiUrl: this.activeBaseUrl === PROXY_API_URL ? `${REMOTE_API_URL} (via Proxy)` : this.activeBaseUrl,
+        apiUrl: this.activeBaseUrl,
         latencyMs,
         message: 'Koneksi ke Backend Laravel 13 AI-Native Aktif & Stabil',
         institutionName: res?.institution?.name || 'SIMPANANKU',
@@ -149,7 +96,7 @@ export class ApiClient {
     } catch (err: any) {
       return {
         connected: false,
-        apiUrl: REMOTE_API_URL,
+        apiUrl: this.activeBaseUrl,
         latencyMs: Math.round(performance.now() - start),
         message: `Koneksi API terhambat: ${err.message || 'Server tidak merespons'}`,
       };
@@ -161,7 +108,7 @@ export class ApiClient {
   // ==========================================
   public static async login(email: string, password: string): Promise<{
     success: boolean;
-    token: string;
+    token: string | null;
     user: User;
     member?: Member | null;
     message?: string;
@@ -170,10 +117,6 @@ export class ApiClient {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
-
-    if (res.token) {
-      this.setToken(res.token);
-    }
 
     const transformedUser: User = {
       id: res.user?.id || `USR-${Date.now()}`,
@@ -213,13 +156,7 @@ export class ApiClient {
   }
 
   public static async logout(): Promise<void> {
-    try {
-      await this.request('/auth/logout', { method: 'POST' });
-    } catch (e) {
-      console.warn('Logout API error:', e);
-    } finally {
-      this.setToken(null);
-    }
+    await this.request('/auth/logout', { method: 'POST' });
   }
 
   // ==========================================
@@ -265,6 +202,7 @@ export class ApiClient {
     address: string;
     occupation?: string;
     initialDeposit?: number;
+    password?: string;
   }): Promise<{ success: boolean; member: Member; user?: User; defaultPassword?: string; message: string }> {
     const res = await this.request('/members/register', {
       method: 'POST',
@@ -275,7 +213,8 @@ export class ApiClient {
         phone: payload.phone,
         address: payload.address,
         occupation: payload.occupation || 'Wirausaha / Mandiri',
-        initial_deposit: payload.initialDeposit || 50000,
+        initial_deposit: payload.initialDeposit ?? 0,
+        password: payload.password,
       }),
     });
 
@@ -291,7 +230,7 @@ export class ApiClient {
         memberId: res.user.member_id,
         createdAt: res.user.created_at || new Date().toISOString(),
       } : undefined,
-      defaultPassword: res.default_password || 'nasabah123',
+      defaultPassword: res.default_password,
       message: res.message,
     };
   }
@@ -299,6 +238,7 @@ export class ApiClient {
   public static async updateMember(memberNumber: string, payload: Partial<Member>): Promise<Member> {
     const body: Record<string, any> = {};
     if (payload.fullName) body.full_name = payload.fullName;
+    if (payload.nik) body.nik = payload.nik;
     if (payload.phone) body.phone = payload.phone;
     if (payload.email) body.email = payload.email;
     if (payload.address) body.address = payload.address;
@@ -311,6 +251,35 @@ export class ApiClient {
     });
 
     return this.transformMember(res.data);
+  }
+
+  public static async deleteMember(memberNumber: string): Promise<void> {
+    await this.request(`/members/${memberNumber}`, { method: 'DELETE' });
+  }
+
+  public static async resetMemberPassword(memberNumber: string, password: string): Promise<void> {
+    await this.request(`/members/${memberNumber}/password`, { method: 'PUT', body: JSON.stringify({ password }) });
+  }
+
+  public static async getStaff(): Promise<User[]> {
+    const res = await this.request('/staff');
+    return res.data.map((u: any) => ({ ...u, id: `USR-${u.id}`, createdAt: u.created_at }));
+  }
+
+  public static async createStaff(user: User): Promise<void> {
+    await this.request('/staff', { method: 'POST', body: JSON.stringify(user) });
+  }
+
+  public static async updateStaff(user: User): Promise<void> {
+    await this.request(`/staff/${user.id.replace('USR-', '')}`, { method: 'PUT', body: JSON.stringify(user) });
+  }
+
+  public static async deleteStaff(id: string): Promise<void> {
+    await this.request(`/staff/${id.replace('USR-', '')}`, { method: 'DELETE' });
+  }
+
+  public static async changePassword(currentPassword: string, password: string): Promise<void> {
+    await this.request('/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password: currentPassword, password, password_confirmation: password }) });
   }
 
   // ==========================================
@@ -357,6 +326,42 @@ export class ApiClient {
     return this.transformSavingsProduct(res.data);
   }
 
+  public static async deleteSavingsProduct(id: string): Promise<void> {
+    await this.request(`/savings-products/${id}`, { method: 'DELETE' });
+  }
+
+  public static async updatePawn(pawn: PawnPledge): Promise<void> {
+    await this.request(`/pawns/${pawn.pawnCode}`, { method: 'PUT', body: JSON.stringify({
+      item_type: pawn.itemType, item_description: pawn.itemDescription, estimated_value: pawn.estimatedValue,
+      loan_amount: pawn.loanAmount, ujrah_fee_per_month: pawn.monthlyUjrah, tenor_months: pawn.periodMonths,
+      due_date: pawn.dueDate, status: pawn.status === 'ditebus' ? 'lunas' : pawn.status, notes: pawn.notes,
+    }) });
+  }
+
+  public static async deletePawn(number: string): Promise<void> {
+    await this.request(`/pawns/${number}`, { method: 'DELETE' });
+  }
+
+  public static async updateCredit(credit: CommodityFinancing): Promise<void> {
+    await this.request(`/commodity-financings/${credit.contractNumber}`, { method: 'PUT', body: JSON.stringify({
+      item_name: credit.itemName, item_category: credit.itemCategory, purchase_price: credit.purchaseCost,
+      down_payment: credit.downPayment, margin_amount: credit.marginAmount, tenor_months: credit.tenorMonths,
+      status: credit.status === 'diajukan' || credit.status === 'macet' ? 'menunggak' : credit.status,
+    }) });
+  }
+
+  public static async deleteCredit(number: string): Promise<void> {
+    await this.request(`/commodity-financings/${number}`, { method: 'DELETE' });
+  }
+
+  public static async updateTransaction(tx: Transaction): Promise<void> {
+    await this.request(`/transactions/${tx.referenceNumber}`, { method: 'PUT', body: JSON.stringify({ description: tx.notes }) });
+  }
+
+  public static async deleteTransaction(ref: string): Promise<void> {
+    await this.request(`/transactions/${ref}`, { method: 'DELETE' });
+  }
+
   // ==========================================
   // Rekening Simpanan (Savings Accounts)
   // ==========================================
@@ -369,6 +374,13 @@ export class ApiClient {
 
   public static async getSavingsAccount(accountNumber: string): Promise<SavingsAccount> {
     const res = await this.request(`/savings-accounts/${accountNumber}`);
+    return this.transformSavingsAccount(res.data);
+  }
+
+  public static async createSavingsAccount(memberNumber: string, productId: string): Promise<SavingsAccount> {
+    const res = await this.request('/savings-accounts', {
+      method: 'POST', body: JSON.stringify({ member_number: memberNumber, product_id: productId }),
+    });
     return this.transformSavingsAccount(res.data);
   }
 
@@ -749,7 +761,7 @@ export class ApiClient {
       startDate: p.start_date ? p.start_date.split('T')[0] : (p.startDate || new Date().toISOString().split('T')[0]),
       dueDate: p.due_date ? p.due_date.split('T')[0] : (p.dueDate || new Date().toISOString().split('T')[0]),
       status: p.status === 'lunas' ? 'ditebus' : (p.status || 'aktif'),
-      paidUjrahTotal: p.paid_ujrah_total ?? (p.paidUjrahTotal || 0),
+      paidUjrahTotal: Number(p.paid_ujrah_total ?? p.paidUjrahTotal ?? 0),
       notes: p.notes || '',
     };
   }
@@ -763,7 +775,21 @@ export class ApiClient {
     const remainingBalance = typeof c.remaining_amount === 'number' ? c.remaining_amount : parseFloat(c.remaining_amount || c.remainingBalance || '0');
     const tenorMonths = parseInt(c.tenor_months || c.tenorMonths || '12', 10);
     const paidAmount = typeof c.paid_amount === 'number' ? c.paid_amount : parseFloat(c.paid_amount || '0');
-    const paidCount = monthlyInstallment > 0 ? Math.floor(paidAmount / monthlyInstallment) : 0;
+    const paidCount = monthlyInstallment > 0 ? Math.min(tenorMonths, Math.round(paidAmount / monthlyInstallment)) : 0;
+    const startDate = c.start_date ? c.start_date.split('T')[0] : (c.startDate || new Date().toISOString().split('T')[0]);
+    const installments = Array.from({ length: tenorMonths }, (_, i) => {
+      const due = new Date(`${startDate}T12:00:00`);
+      due.setMonth(due.getMonth() + i + 1);
+      return {
+        id: `${c.financing_number}-${i + 1}`,
+        installmentNo: i + 1,
+        dueDate: due.toISOString().split('T')[0],
+        amount: monthlyInstallment,
+        principalPortion: tenorMonths ? Math.round((purchaseCost - downPayment) / tenorMonths) : 0,
+        marginPortion: tenorMonths ? Math.round(marginAmount / tenorMonths) : 0,
+        status: i < paidCount ? 'lunas' as const : 'belum_bayar' as const,
+      };
+    });
 
     return {
       id: c.financing_number || String(c.id),
@@ -781,20 +807,24 @@ export class ApiClient {
       monthlyInstallment,
       remainingBalance,
       paidInstallmentsCount: paidCount,
-      startDate: c.start_date ? c.start_date.split('T')[0] : (c.startDate || new Date().toISOString().split('T')[0]),
-      status: c.status || 'berjalan',
-      installments: [],
+      startDate,
+      status: c.status === 'menunggak' ? 'macet' : (c.status || 'berjalan'),
+      installments,
     };
   }
 
   public static transformTransaction(t: any): Transaction {
     const amt = typeof t.amount === 'number' ? t.amount : parseFloat(t.amount || '0');
+    const types: Record<string, Transaction['type']> = {
+      pencairan_gadai: 'gadai_pencairan', pelunasan_gadai: 'gadai_tebus', biaya_ujrah: 'gadai_ujrah',
+      pencairan_kredit: 'kredit_pencairan', angsuran_kredit: 'kredit_angsuran',
+    };
     return {
       id: t.reference_number || String(t.id),
       referenceNumber: t.reference_number || t.referenceNumber || `TRX-${Date.now()}`,
       memberNumber: t.member_number || t.memberNumber || 'AG0001',
       memberName: t.member_name || t.memberName || 'Anggota',
-      type: (t.type || 'setoran') as any,
+      type: types[t.type] || t.type || 'setoran',
       akad: (t.akad || 'wadiah') as any,
       amount: amt,
       notes: t.description || t.notes || 'Transaksi Syariah',

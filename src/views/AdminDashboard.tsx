@@ -49,6 +49,7 @@ import {
 } from '../types';
 import { formatRupiah, formatDateIndo, generateMemberNumber } from '../services/generator';
 import { notificationService } from '../services/notificationService';
+import { ApiClient } from '../services/api';
 import { ReceiptModal } from '../components/ReceiptModal';
 import { generateReceiptPdf } from '../services/receiptPdfService';
 import simpanankuLogo from '../assets/images/simpananku.jpg';
@@ -71,6 +72,7 @@ const REPORT_MONTHS = [
 const REPORT_YEARS = ['2023', '2024', '2025', '2026', '2027', '2028'];
 
 interface AdminDashboardProps {
+  onRefreshData: () => Promise<void>;
   currentUser?: User;
   onUpdateCurrentUser?: (user: User) => void;
   users: User[];
@@ -104,6 +106,7 @@ type AdminTab =
   | 'profile';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
+  onRefreshData,
   currentUser,
   onUpdateCurrentUser,
   users,
@@ -124,6 +127,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onPayUjrah,
 }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const runMutation = async (work: () => Promise<unknown>) => {
+    setSaving(true); setSaveError(null);
+    try { await work(); await onRefreshData(); return true; }
+    catch (error: any) { setSaveError(error.message || 'Gagal menyimpan perubahan.'); return false; }
+    finally { setSaving(false); }
+  };
   const [searchQuery, setSearchQuery] = useState('');
   
   // Generic Create/Edit Modal states
@@ -436,112 +447,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deleteModal) return;
-    const { type, id, itemName } = deleteModal;
-
-    if (type === 'member') {
-      const target = members.find((m) => m.id === id);
-      onUpdateMembers(members.filter((m) => m.id !== id));
-      if (target) {
-        onUpdateUsers(users.filter((u) => u.memberId !== target.memberNumber && u.email !== target.email));
-        if (accounts.length > 0 && onUpdateAccounts) {
-          onUpdateAccounts(accounts.filter((a) => a.memberNumber !== target.memberNumber));
-        }
-      }
-      notificationService.broadcast({
-        title: 'Nasabah Dihapus',
-        message: `Data nasabah ${itemName} beserta akun dan rekening terkait telah dihapus oleh Administrator.`,
-        category: 'sistem',
-      });
-    } else if (type === 'product') {
-      onUpdateProducts(products.filter((x) => x.id !== id));
-      notificationService.broadcast({
-        title: 'Produk Simpanan Dihapus',
-        message: `Produk simpanan ${itemName} telah berhasil dihapus.`,
-        category: 'sistem',
-      });
-    } else if (type === 'pawn') {
-      const targetPawn = pawns.find((p) => p.id === id);
-      onUpdatePawns(pawns.filter((p) => p.id !== id));
-      if (targetPawn && targetPawn.status === 'aktif') {
-        const updatedMembers = members.map((m) =>
-          m.memberNumber === targetPawn.memberNumber
-            ? { ...m, activePawnCount: Math.max(0, (m.activePawnCount || 0) - 1) }
-            : m
-        );
-        onUpdateMembers(updatedMembers);
-      }
-      notificationService.broadcast({
-        title: 'Kontrak Gadai Dihapus',
-        message: `Data gadai ${itemName} telah dihapus dari portofolio Rahn aktif.`,
-        category: 'gadai',
-      });
-    } else if (type === 'credit') {
-      const targetCredit = credits.find((c) => c.id === id);
-      onUpdateCredits(credits.filter((c) => c.id !== id));
-      if (targetCredit && targetCredit.status === 'berjalan') {
-        const updatedMembers = members.map((m) =>
-          m.memberNumber === targetCredit.memberNumber
-            ? { ...m, activeCreditCount: Math.max(0, (m.activeCreditCount || 0) - 1) }
-            : m
-        );
-        onUpdateMembers(updatedMembers);
-      }
-      notificationService.broadcast({
-        title: 'Kontrak Kredit Barang Dihapus',
-        message: `Kontrak pembiayaan ${itemName} telah dihapus dari piutang berjalan.`,
-        category: 'angsuran',
-      });
-    } else if (type === 'transaction') {
-      if (onUpdateTransactions) {
-        onUpdateTransactions(transactions.filter((t) => t.id !== id));
-      }
-      notificationService.broadcast({
-        title: 'Transaksi Kas Dihapus',
-        message: `Transaksi ${itemName} telah dihapus dari buku mutasi kas.`,
-        category: 'sistem',
-      });
-    } else if (type === 'teller' || type === 'admin') {
-      onUpdateUsers(users.filter((u) => u.id !== id));
-      notificationService.broadcast({
-        title: `Pengguna ${type === 'admin' ? 'Administrator' : 'Teller'} Dihapus`,
-        message: `Akun petugas ${itemName} telah dihapus dari sistem.`,
-        category: 'sistem',
-      });
-    }
-
-    setDeleteModal(null);
+    const { type, id } = deleteModal;
+    const ok = await runMutation(async () => {
+      if (type === 'member') await ApiClient.deleteMember(members.find(m => m.id === id)!.memberNumber);
+      else if (type === 'product') await ApiClient.deleteSavingsProduct(id);
+      else if (type === 'pawn') await ApiClient.deletePawn(pawns.find(p => p.id === id)!.pawnCode);
+      else if (type === 'credit') await ApiClient.deleteCredit(credits.find(c => c.id === id)!.contractNumber);
+      else if (type === 'transaction') await ApiClient.deleteTransaction(transactions.find(t => t.id === id)!.referenceNumber);
+      else await ApiClient.deleteStaff(id);
+    });
+    if (ok) setDeleteModal(null);
   };
 
   // Handlers for Staff
-  const handleSaveStaff = (e: React.FormEvent) => {
+  const handleSaveStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    const defaultPass = staffRole === 'admin' ? 'admin123' : 'teller123';
-    const chosenPassword = staffPassword.trim() || defaultPass;
-    const newUser: User = {
-      id: 'USR-' + Date.now(),
-      name: staffName,
-      email: staffEmail,
-      role: staffRole,
-      phone: staffPhone,
-      password: chosenPassword,
-      createdAt: new Date().toISOString(),
-    };
-    onUpdateUsers([...users, newUser]);
-    setShowStaffModal(false);
-    setStaffName('');
-    setStaffEmail('');
-    setStaffPhone('');
-    setStaffPassword('');
-    setShowStaffPassword(false);
-
-    notificationService.broadcast({
-      title: `Petugas ${staffRole.toUpperCase()} Baru`,
-      message: `${staffName} (${staffEmail}) telah ditambahkan ke sistem dengan password yang ditentukan.`,
-      category: 'sistem',
-      targetRole: 'admin',
-    });
+    const ok = await runMutation(() => ApiClient.createStaff({
+      id: '', name: staffName, email: staffEmail, role: staffRole, phone: staffPhone,
+      password: staffPassword, createdAt: '',
+    }));
+    if (ok) { setShowStaffModal(false); setStaffName(''); setStaffEmail(''); setStaffPhone(''); setStaffPassword(''); }
   };
 
   const handleDeleteUser = (userId: string) => {
@@ -572,104 +499,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setShowChangePasswordModal(true);
   };
 
-  const handleChangePasswordSubmit = (e: React.FormEvent) => {
+  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!changePassTarget) return;
-    if (targetNewPassword.trim().length < 6) {
-      setTargetErrorMessage('Password baru minimal 6 karakter!');
-      return;
-    }
-
-    const newPass = targetNewPassword.trim();
-
-    if (changePassTarget.type === 'nasabah') {
-      // 1. Update in members collection
-      const updatedMembers = members.map((m) =>
-        m.id === changePassTarget.id || m.memberNumber === changePassTarget.identifier
-          ? { ...m, password: newPass }
-          : m
-      );
-      onUpdateMembers(updatedMembers);
-
-      // 2. Sync to linked user record
-      const updatedUsers = users.map((u) =>
-        u.memberId === changePassTarget.identifier || u.email === changePassTarget.identifier || u.id === changePassTarget.id
-          ? { ...u, password: newPass }
-          : u
-      );
-      onUpdateUsers(updatedUsers);
-    } else {
-      // Teller or Admin user
-      const updatedUsers = users.map((u) =>
-        u.id === changePassTarget.id ? { ...u, password: newPass } : u
-      );
-      onUpdateUsers(updatedUsers);
-
-      // If updating current logged in user
-      if (currentUser && currentUser.id === changePassTarget.id && onUpdateCurrentUser) {
-        onUpdateCurrentUser({ ...currentUser, password: newPass });
-      }
-    }
-
-    notificationService.broadcast({
-      title: 'Password Pengguna Diperbarui',
-      message: `Password akun ${changePassTarget.name} (${changePassTarget.identifier}) berhasil diubah oleh Administrator.`,
-      category: 'sistem',
-      targetRole: changePassTarget.type,
-    });
-
-    setTargetSuccessMessage(`Password akun ${changePassTarget.name} berhasil diperbarui!`);
-    setTimeout(() => {
-      setShowChangePasswordModal(false);
-      setChangePassTarget(null);
-      setTargetSuccessMessage(null);
-    }, 1000);
+    if (targetNewPassword.length < 8) { setTargetErrorMessage('Password baru minimal 8 karakter.'); return; }
+    const target = users.find(u => u.id === changePassTarget.id);
+    const ok = await runMutation(() => changePassTarget.type === 'nasabah'
+      ? ApiClient.resetMemberPassword(changePassTarget.identifier, targetNewPassword)
+      : target ? ApiClient.updateStaff({ ...target, password: targetNewPassword })
+      : Promise.reject(new Error('Akun tidak ditemukan.')));
+    if (ok) { setTargetSuccessMessage('Password diperbarui.'); setShowChangePasswordModal(false); }
+    else setTargetErrorMessage('Perubahan gagal disimpan.');
   };
 
   // Admin Self Profile Password Change
-  const handleChangeAdminOwnPassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminPassError(null);
-    setAdminPassSuccess(null);
-
-    const activeAdmin = currentUser || users.find((u) => u.role === 'admin');
-    if (!activeAdmin) return;
-
-    if (adminCurrentPassword && activeAdmin.password && adminCurrentPassword !== activeAdmin.password) {
-      setAdminPassError('Password saat ini tidak sesuai!');
-      return;
-    }
-
-    if (adminNewPassword.length < 6) {
-      setAdminPassError('Password baru minimal 6 karakter!');
-      return;
-    }
-
-    if (adminNewPassword !== adminConfirmPassword) {
-      setAdminPassError('Konfirmasi password baru tidak cocok!');
-      return;
-    }
-
-    const updatedUsers = users.map((u) =>
-      u.id === activeAdmin.id ? { ...u, password: adminNewPassword } : u
-    );
-    onUpdateUsers(updatedUsers);
-
-    if (onUpdateCurrentUser) {
-      onUpdateCurrentUser({ ...activeAdmin, password: adminNewPassword });
-    }
-
-    setAdminPassSuccess('Kata sandi Administrator berhasil diperbarui!');
-    setAdminCurrentPassword('');
-    setAdminNewPassword('');
-    setAdminConfirmPassword('');
-
-    notificationService.broadcast({
-      title: 'Password Admin Diubah',
-      message: `Administrator ${activeAdmin.name} telah memperbarui kata sandi login.`,
-      category: 'sistem',
-      targetRole: 'admin',
-    });
+  const handleChangeAdminOwnPassword = async (e: React.FormEvent) => {
+    e.preventDefault(); setAdminPassError(null); setAdminPassSuccess(null);
+    if (adminNewPassword !== adminConfirmPassword) { setAdminPassError('Konfirmasi password tidak cocok.'); return; }
+    const ok = await runMutation(() => ApiClient.changePassword(adminCurrentPassword, adminNewPassword));
+    if (ok) { setAdminPassSuccess('Password diperbarui. Silakan masuk kembali.'); window.location.reload(); }
+    else setAdminPassError('Gagal mengubah password. Periksa password saat ini.');
   };
 
   // Handlers for Member
@@ -681,7 +530,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setMemEmail('');
     setMemAddress('');
     setMemOccupation('');
-    setMemPassword('nasabah123');
+    setMemPassword('');
     setShowMemPassword(false);
     setShowMemberModal(true);
   };
@@ -694,78 +543,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setMemEmail(m.email);
     setMemAddress(m.address);
     setMemOccupation(m.occupation);
-    setMemPassword(m.password || 'nasabah123');
+    setMemPassword('');
     setShowMemPassword(false);
     setShowMemberModal(true);
   };
 
-  const handleSaveMember = (e: React.FormEvent) => {
+  const handleSaveMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    const chosenPassword = memPassword.trim() || 'nasabah123';
-    if (editingMember) {
-      const updated = members.map((m) =>
-        m.id === editingMember.id
-          ? {
-              ...m,
-              fullName: memFullName,
-              nik: memNik,
-              phone: memPhone,
-              email: memEmail,
-              address: memAddress,
-              occupation: memOccupation,
-              password: chosenPassword,
-            }
-          : m
-      );
-      onUpdateMembers(updated);
-
-      // Sync user table
-      const updatedUsers = users.map((u) =>
-        u.memberId === editingMember.memberNumber || u.email === editingMember.email
-          ? {
-              ...u,
-              name: memFullName,
-              email: memEmail || u.email,
-              phone: memPhone,
-              password: chosenPassword,
-            }
-          : u
-      );
-      onUpdateUsers(updatedUsers);
-    } else {
-      const nextNum = generateMemberNumber(members.length);
-      const newM: Member = {
-        id: 'MBR-' + Date.now(),
-        memberNumber: nextNum,
-        nik: memNik,
-        fullName: memFullName,
-        email: memEmail || `${nextNum.toLowerCase()}@simpananku.my.id`,
-        phone: memPhone,
-        address: memAddress,
-        occupation: memOccupation,
-        status: 'aktif',
-        joinDate: new Date().toISOString().split('T')[0],
-        totalSavings: 0,
-        activePawnCount: 0,
-        activeCreditCount: 0,
-        password: chosenPassword,
-      };
-      onUpdateMembers([...members, newM]);
-
-      // Create linked user login
-      const newU: User = {
-        id: 'USR-' + Date.now(),
-        name: memFullName,
-        email: newM.email,
-        role: 'nasabah',
-        phone: memPhone,
-        memberId: nextNum,
-        password: chosenPassword,
-        createdAt: new Date().toISOString(),
-      };
-      onUpdateUsers([...users, newU]);
-    }
-    setShowMemberModal(false);
+    const payload = { nik: memNik, fullName: memFullName, phone: memPhone, email: memEmail,
+      address: memAddress, occupation: memOccupation };
+    const ok = await runMutation(() => editingMember
+      ? ApiClient.updateMember(editingMember.memberNumber, payload)
+      : ApiClient.registerMember({ ...payload, initialDeposit: 0, password: memPassword }));
+    if (ok) setShowMemberModal(false);
   };
 
   const handleDeleteMember = (memberId: string) => {
@@ -805,51 +595,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setShowProductModal(true);
   };
 
-  const handleSaveProduct = (e: React.FormEvent) => {
+  const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingProduct) {
-      onUpdateProducts(
-        products.map((p) =>
-          p.id === editingProduct.id
-            ? {
-                ...p,
-                code: prodCode,
-                name: prodName,
-                akad: prodAkad,
-                description: prodDesc,
-                minInitialDeposit: prodMinDeposit,
-                minBalance: prodMinBalance,
-                profitSharingRatio: prodAkad === 'mudharabah' ? prodRatio : undefined,
-              }
-            : p
-        )
-      );
-      notificationService.broadcast({
-        title: 'Produk Simpanan Diperbarui',
-        message: `Produk simpanan ${prodName} (${prodCode}) berhasil diubah.`,
-        category: 'sistem',
-      });
-    } else {
-      const newP: SavingsProduct = {
-        id: 'PRD-' + Date.now(),
-        code: prodCode || 'PRD-' + (products.length + 1),
-        name: prodName,
-        akad: prodAkad,
-        description: prodDesc,
-        minInitialDeposit: prodMinDeposit,
-        minBalance: prodMinBalance,
-        adminFee: 0,
-        profitSharingRatio: prodAkad === 'mudharabah' ? prodRatio : undefined,
-        isActive: true,
-      };
-      onUpdateProducts([...products, newP]);
-      notificationService.broadcast({
-        title: 'Produk Simpanan Baru',
-        message: `Produk simpanan ${newP.name} (${newP.code}) berhasil ditambahkan.`,
-        category: 'sistem',
-      });
-    }
-    setShowProductModal(false);
+    const payload: Partial<SavingsProduct> = { code: prodCode, name: prodName, akad: prodAkad, description: prodDesc,
+      minInitialDeposit: prodMinDeposit, minBalance: prodMinBalance, adminFee: 0,
+      profitSharingRatio: prodAkad === 'mudharabah' ? prodRatio : undefined, isActive: true };
+    const ok = await runMutation(() => editingProduct
+      ? ApiClient.updateSavingsProduct(editingProduct.id, payload)
+      : ApiClient.createSavingsProduct(payload));
+    if (ok) setShowProductModal(false);
   };
 
   const handleDeleteProduct = (prodId: string) => {
@@ -903,50 +657,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setShowPawnModal(true);
   };
 
-  const handleSavePawn = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingPawn) return;
-
-    const updatedPawns = pawns.map((p) =>
-      p.id === editingPawn.id
-        ? {
-            ...p,
-            itemDescription: pawnItemDesc,
-            itemType: pawnItemType,
-            estimatedValue: Number(pawnEstValue),
-            loanAmount: Number(pawnLoan),
-            monthlyUjrah: Number(pawnUjrah),
-            periodMonths: Number(pawnPeriod),
-            dueDate: pawnDueDate,
-            status: pawnStatus,
-            notes: pawnNotes,
-          }
-        : p
-    );
-    onUpdatePawns(updatedPawns);
-
-    if (editingPawn.status !== pawnStatus) {
-      const wasActive = editingPawn.status === 'aktif';
-      const isNowActive = pawnStatus === 'aktif';
-      if (wasActive !== isNowActive) {
-        const diff = isNowActive ? 1 : -1;
-        const updatedMembers = members.map((m) =>
-          m.memberNumber === editingPawn.memberNumber
-            ? { ...m, activePawnCount: Math.max(0, (m.activePawnCount || 0) + diff) }
-            : m
-        );
-        onUpdateMembers(updatedMembers);
-      }
-    }
-
-    setShowPawnModal(false);
-    setEditingPawn(null);
-
-    notificationService.broadcast({
-      title: 'Perubahan Kontrak & Ujrah Gadai',
-      message: `Data gadai ${editingPawn.pawnCode} (${editingPawn.memberName}) dengan Ujrah/Bln ${formatRupiah(pawnUjrah)} telah diperbarui.`,
-      category: 'gadai',
-    });
+  const handleSavePawn = async (e: React.FormEvent) => {
+    e.preventDefault(); if (!editingPawn) return;
+    const ok = await runMutation(() => ApiClient.updatePawn({ ...editingPawn,
+      itemDescription: pawnItemDesc, itemType: pawnItemType, estimatedValue: pawnEstValue,
+      loanAmount: pawnLoan, monthlyUjrah: pawnUjrah, periodMonths: pawnPeriod,
+      dueDate: pawnDueDate, status: pawnStatus, notes: pawnNotes,
+    }));
+    if (ok) { setShowPawnModal(false); setEditingPawn(null); }
   };
 
   // Handlers for Credit (Kredit Barang - Murabahah)
@@ -962,62 +680,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setShowCreditModal(true);
   };
 
-  const handleSaveCredit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingCredit) return;
-
-    const cost = Number(creditCost);
-    const margin = Number(creditMargin);
-    const dp = Number(creditDP);
-    const tenor = Number(creditTenor) || 1;
-    const sellingPrice = cost + margin;
-    const financingAmount = Math.max(0, sellingPrice - dp);
-    const monthlyInstallment = Math.round(financingAmount / tenor);
-    const paidCount = editingCredit.paidInstallmentsCount;
-    const remainingBalance = Math.max(0, financingAmount - paidCount * monthlyInstallment);
-
-    const updatedCredits = credits.map((c) =>
-      c.id === editingCredit.id
-        ? {
-            ...c,
-            itemName: creditItemName,
-            itemCategory: creditItemCategory,
-            purchaseCost: cost,
-            marginAmount: margin,
-            sellingPrice,
-            downPayment: dp,
-            financingAmount,
-            tenorMonths: tenor,
-            monthlyInstallment,
-            remainingBalance,
-            status: creditStatus,
-          }
-        : c
-    );
-    onUpdateCredits(updatedCredits);
-
-    if (editingCredit.status !== creditStatus) {
-      const wasActive = editingCredit.status === 'berjalan';
-      const isNowActive = creditStatus === 'berjalan';
-      if (wasActive !== isNowActive) {
-        const diff = isNowActive ? 1 : -1;
-        const updatedMembers = members.map((m) =>
-          m.memberNumber === editingCredit.memberNumber
-            ? { ...m, activeCreditCount: Math.max(0, (m.activeCreditCount || 0) + diff) }
-            : m
-        );
-        onUpdateMembers(updatedMembers);
-      }
-    }
-
-    setShowCreditModal(false);
-    setEditingCredit(null);
-
-    notificationService.broadcast({
-      title: 'Perubahan Kontrak & Margin Kredit Barang',
-      message: `Kontrak ${editingCredit.contractNumber} (${creditItemName}) telah diperbarui dengan Margin Syariah ${formatRupiah(margin)}.`,
-      category: 'angsuran',
-    });
+  const handleSaveCredit = async (e: React.FormEvent) => {
+    e.preventDefault(); if (!editingCredit) return;
+    const ok = await runMutation(() => ApiClient.updateCredit({ ...editingCredit,
+      itemName: creditItemName, itemCategory: creditItemCategory, purchaseCost: creditCost,
+      marginAmount: creditMargin, downPayment: creditDP, tenorMonths: creditTenor, status: creditStatus,
+    }));
+    if (ok) { setShowCreditModal(false); setEditingCredit(null); }
   };
 
   // Handlers for Transactions
@@ -1032,32 +701,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setShowTxModal(true);
   };
 
-  const handleSaveTx = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingTx || !onUpdateTransactions) return;
-
-    const updated = transactions.map((t) =>
-      t.id === editingTx.id
-        ? {
-            ...t,
-            amount: Number(txAmount),
-            type: txType,
-            akad: txAkad,
-            paymentMethod: txPaymentMethod,
-            status: txStatus,
-            notes: txNotes,
-          }
-        : t
-    );
-    onUpdateTransactions(updated);
-    setShowTxModal(false);
-    setEditingTx(null);
-
-    notificationService.broadcast({
-      title: 'Koreksi Transaksi Kas',
-      message: `Transaksi ${editingTx.referenceNumber} senilai ${formatRupiah(txAmount)} telah diperbarui oleh Administrator.`,
-      category: 'sistem',
-    });
+  const handleSaveTx = async (e: React.FormEvent) => {
+    e.preventDefault(); if (!editingTx) return;
+    const ok = await runMutation(() => ApiClient.updateTransaction({ ...editingTx, notes: txNotes, status: txStatus }));
+    if (ok) { setShowTxModal(false); setEditingTx(null); }
   };
 
   const handleDeleteTx = (txId: string) => {
@@ -1136,6 +783,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   );
 
   return (
+    <div>
+      {saveError && <div role="alert" className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] max-w-lg rounded-lg bg-rose-50 border border-rose-300 shadow-xl p-3 text-rose-800">{saveError}</div>}
+      {saving && <div role="status" className="fixed top-4 right-4 z-[100] rounded-lg bg-white shadow p-3 text-emerald-800">Menyimpan perubahan...</div>}
     <div className="space-y-6">
       {/* Top Header Card */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -3004,9 +2654,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="relative">
                   <input
                     type={showMemPassword ? 'text' : 'password'}
+                    required={!editingMember}
+                    minLength={8}
                     value={memPassword}
                     onChange={(e) => setMemPassword(e.target.value)}
-                    placeholder="Minimal 6 karakter (default: nasabah123)"
+                    placeholder={editingMember ? 'Gunakan menu Ubah Password' : 'Minimal 8 karakter'}
                     className="w-full pl-3 pr-9 py-2 text-xs font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-hidden"
                   />
                   <button
@@ -3107,9 +2759,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="relative">
                   <input
                     type={showStaffPassword ? 'text' : 'password'}
+                    required
+                    minLength={8}
                     value={staffPassword}
                     onChange={(e) => setStaffPassword(e.target.value)}
-                    placeholder={`Minimal 6 karakter (default: ${staffRole === 'admin' ? 'admin123' : 'teller123'})`}
+                    placeholder="Minimal 8 karakter"
                     className="w-full pl-3 pr-9 py-2 text-xs font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-hidden"
                   />
                   <button
@@ -3786,78 +3440,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nominal Mutasi (Rp):</label>
-                <input
-                  type="number"
-                  required
-                  min={1}
-                  value={txAmount}
-                  onChange={(e) => setTxAmount(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-hidden font-mono"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Jenis Transaksi:</label>
-                  <select
-                    value={txType}
-                    onChange={(e) => setTxType(e.target.value as Transaction['type'])}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-hidden"
-                  >
-                    <option value="setoran">Setoran Simpanan</option>
-                    <option value="penarikan">Penarikan Simpanan</option>
-                    <option value="gadai_pencairan">Pencairan Gadai</option>
-                    <option value="gadai_tebus">Tebus / Pelunasan Gadai</option>
-                    <option value="gadai_ujrah">Pembayaran Ujrah</option>
-                    <option value="kredit_pencairan">Pencairan Kredit</option>
-                    <option value="kredit_angsuran">Angsuran Murabahah</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Akad Syariah:</label>
-                  <select
-                    value={txAkad}
-                    onChange={(e) => setTxAkad(e.target.value as ShariaAkad)}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-hidden uppercase"
-                  >
-                    <option value="wadiah">Wadi'ah</option>
-                    <option value="mudharabah">Mudharabah</option>
-                    <option value="murabahah">Murabahah</option>
-                    <option value="rahn">Rahn (Gadai)</option>
-                    <option value="ijarah">Ijarah</option>
-                    <option value="qardh">Qardh</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Metode Pembayaran:</label>
-                  <select
-                    value={txPaymentMethod}
-                    onChange={(e) => setTxPaymentMethod(e.target.value as Transaction['paymentMethod'])}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-hidden uppercase"
-                  >
-                    <option value="tunai">Tunai Kas</option>
-                    <option value="transfer">Transfer Bank</option>
-                    <option value="qris">QRIS Syariah</option>
-                    <option value="autodebet">Autodebet</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Status:</label>
-                  <select
-                    value={txStatus}
-                    onChange={(e) => setTxStatus(e.target.value as Transaction['status'])}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-hidden uppercase font-bold"
-                  >
-                    <option value="success">Sukses</option>
-                    <option value="pending">Pending</option>
-                    <option value="failed">Gagal</option>
-                  </select>
-                </div>
+              <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
+                Nominal {formatRupiah(editingTx.amount)}, jenis transaksi, dan status pembukuan tetap sesuai catatan asli. Koreksi di sini hanya mengubah keterangan.
               </div>
 
               <div>
@@ -4421,6 +4005,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           }}
         />
       )}
+    </div>
     </div>
   );
 };

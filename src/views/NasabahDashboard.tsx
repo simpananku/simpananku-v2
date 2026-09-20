@@ -37,7 +37,8 @@ import { formatRupiah, formatDateIndo } from '../services/generator';
 import { ReceiptModal } from '../components/ReceiptModal';
 import { generateReceiptPdf } from '../services/receiptPdfService';
 import { generatePassbookPdf } from '../services/passbookPdfService';
-import { notificationService } from '../services/notificationService'; 
+import { notificationService } from '../services/notificationService';
+import { ApiClient } from '../services/api';
 import simpanankuLogo from '../assets/images/simpananku.jpg';
 
 interface NasabahDashboardProps {
@@ -82,54 +83,14 @@ export const NasabahDashboard: React.FC<NasabahDashboardProps> = ({
 
   const totalBalance = myAccounts.reduce((acc, a) => acc + a.balance, 0);
 
-  const handleChangePassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordError(null);
-    setPasswordSuccess(null);
-
-    // Validate old password
-    const currentPass = member.password || currentUser.password || 'nasabah123';
-    if (oldPassword && oldPassword !== currentPass) {
-      setPasswordError('Password saat ini tidak sesuai!');
-      return;
-    }
-
-    if (newPassword.length < 6) {
-      setPasswordError('Password baru minimal 6 karakter!');
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setPasswordError('Konfirmasi password baru tidak cocok!');
-      return;
-    }
-
-    // Update member record
-    const updatedMember = {
-      ...member,
-      password: newPassword,
-    };
-    onUpdateMember(updatedMember);
-
-    // Update currentUser record
-    if (onUpdateCurrentUser) {
-      onUpdateCurrentUser({
-        ...currentUser,
-        password: newPassword,
-      });
-    }
-
-    setPasswordSuccess('Password akun Anda berhasil diperbarui!');
-    setOldPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-
-    notificationService.broadcast({
-      title: 'Kata Sandi Nasabah Diperbarui',
-      message: `Nasabah ${member.fullName} (${member.memberNumber}) telah memperbarui kata sandi akunnya.`,
-      category: 'sistem',
-      targetRole: 'nasabah',
-    });
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault(); setPasswordError(null); setPasswordSuccess(null);
+    if (newPassword !== confirmPassword) { setPasswordError('Konfirmasi password tidak cocok.'); return; }
+    try {
+      await ApiClient.changePassword(oldPassword, newPassword);
+      setPasswordSuccess('Password diperbarui. Silakan masuk kembali.');
+      window.location.reload();
+    } catch (error: any) { setPasswordError(error.message || 'Gagal mengubah password.'); }
   };
 
   return (

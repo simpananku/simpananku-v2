@@ -20,6 +20,18 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        if (app()->environment('production')) {
+            $email = env('INITIAL_ADMIN_EMAIL');
+            $password = env('INITIAL_ADMIN_PASSWORD');
+            if (! $email || ! $password || strlen($password) < 12) {
+                throw new \RuntimeException('Set INITIAL_ADMIN_EMAIL and a 12+ character INITIAL_ADMIN_PASSWORD before production seeding.');
+            }
+            User::firstOrCreate(['email' => $email], [
+                'name' => 'Administrator', 'role' => 'admin', 'password' => Hash::make($password),
+            ]);
+            return;
+        }
+
         // 1. Seed Users (Admin & Teller)
         $admin = User::create([
             'name' => 'Ustadz H. Irfan Shidiq, S.E.I., M.E.Sy',

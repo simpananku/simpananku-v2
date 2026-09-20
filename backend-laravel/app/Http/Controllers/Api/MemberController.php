@@ -16,6 +16,9 @@ class MemberController extends Controller
     public function index(Request $request)
     {
         $query = Member::with(['savingsAccounts', 'pawnPledges', 'commodityFinancings']);
+        if ($request->user()->role === 'nasabah') {
+            $query->where('member_number', $request->user()->member_id);
+        }
 
         if ($request->filled('search')) {
             $search = $request->search;
@@ -43,8 +46,9 @@ class MemberController extends Controller
     /**
      * Tampilkan detail satu anggota beserta ringkasan keuangannya.
      */
-    public function show($memberNumber)
+    public function show(Request $request, $memberNumber)
     {
+        abort_if($request->user()->role === 'nasabah' && $request->user()->member_id !== $memberNumber, 403);
         $member = Member::with(['savingsAccounts', 'transactions', 'pawnPledges', 'commodityFinancings'])
             ->where('member_number', $memberNumber)
             ->firstOrFail();
@@ -63,9 +67,10 @@ class MemberController extends Controller
         $member = Member::where('member_number', $memberNumber)->firstOrFail();
 
         $validated = $request->validate([
+            'nik' => ['sometimes', 'required', 'string', 'size:16', \Illuminate\Validation\Rule::unique('members')->ignore($member->id)],
             'full_name' => 'sometimes|required|string|max:255',
             'phone' => 'sometimes|required|string|max:25',
-            'email' => 'nullable|email',
+            'email' => 'nullable|email|unique:users,email,' . ($member->user?->id ?? 'NULL'),
             'address' => 'sometimes|required|string',
             'occupation' => 'nullable|string|max:100',
             'status' => 'sometimes|in:aktif,nonaktif',

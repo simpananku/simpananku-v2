@@ -11,6 +11,8 @@ use App\Http\Controllers\Api\CommodityFinancingController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\AiAdvisoryController;
+use App\Http\Controllers\Api\ManagementController;
+use App\Http\Controllers\Api\StaffController;
 
 /*
 |--------------------------------------------------------------------------
@@ -23,10 +25,7 @@ Route::prefix('v1')->group(function () {
 
     // === Public & Auth Routes ===
     Route::post('/auth/login', [AuthController::class, 'login']);
-    Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
     Route::get('/savings-products', [SavingsProductController::class, 'index']);
-    Route::get('/transactions/{ref}/receipt', [TransactionController::class, 'receipt']);
-    Route::get('/members/next-number', [MemberController::class, 'nextNumber']);
 
     // === AI-Native Advisory (Public/Demo accessible) ===
     Route::post('/ai/audit-sharia', [AiAdvisoryController::class, 'auditSharia']);
@@ -36,6 +35,9 @@ Route::prefix('v1')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
+        Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
+        Route::get('/members/next-number', [MemberController::class, 'nextNumber'])->middleware('role:admin,teller');
+        Route::get('/transactions/{ref}/receipt', [TransactionController::class, 'receipt']);
 
         // Notifikasi Real-time
         Route::get('/notifications', [NotificationController::class, 'index']);
@@ -62,6 +64,8 @@ Route::prefix('v1')->group(function () {
 
         // === Admin & Teller Specific Operations ===
         Route::middleware('role:admin,teller')->group(function () {
+            Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
+            Route::post('/savings-accounts', [SavingsAccountController::class, 'store']);
             // Pendaftaran Anggota Baru
             Route::post('/members/register', [AuthController::class, 'registerMember']);
             Route::put('/members/{memberNumber}', [MemberController::class, 'update']);
@@ -82,8 +86,21 @@ Route::prefix('v1')->group(function () {
 
         // === Admin Only Operations ===
         Route::middleware('role:admin')->group(function () {
+            Route::get('/staff', [StaffController::class, 'index']);
+            Route::post('/staff', [StaffController::class, 'store']);
+            Route::put('/staff/{user}', [StaffController::class, 'update']);
+            Route::delete('/staff/{user}', [StaffController::class, 'destroy']);
+            Route::delete('/members/{memberNumber}', [ManagementController::class, 'deleteMember']);
+            Route::put('/members/{memberNumber}/password', [ManagementController::class, 'resetMemberPassword']);
             Route::post('/savings-products', [SavingsProductController::class, 'store']);
             Route::put('/savings-products/{id}', [SavingsProductController::class, 'update']);
+            Route::delete('/savings-products/{product}', [ManagementController::class, 'deleteProduct']);
+            Route::put('/pawns/{number}', [ManagementController::class, 'updatePawn']);
+            Route::delete('/pawns/{number}', [ManagementController::class, 'deletePawn']);
+            Route::put('/commodity-financings/{number}', [ManagementController::class, 'updateCredit']);
+            Route::delete('/commodity-financings/{number}', [ManagementController::class, 'deleteCredit']);
+            Route::put('/transactions/{ref}', [ManagementController::class, 'updateTransaction']);
+            Route::delete('/transactions/{ref}', [ManagementController::class, 'deleteTransaction']);
         });
     });
 });

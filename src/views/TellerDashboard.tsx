@@ -61,13 +61,13 @@ interface TellerDashboardProps {
   pawns: PawnPledge[];
   credits: CommodityFinancing[];
   transactions: Transaction[];
-  onDeposit: (newTx: Transaction, updatedMember: Member, updatedAccount: SavingsAccount) => void;
-  onWithdraw: (newTx: Transaction, updatedMember: Member, updatedAccount: SavingsAccount) => void;
-  onPawnDisbursement: (newTx: Transaction, newPawn: PawnPledge) => void;
-  onCreditDisbursement: (newTx: Transaction, newCredit: CommodityFinancing) => void;
-  onPayInstallment: (newTx: Transaction, updatedCredit: CommodityFinancing) => void;
-  onPawnRedemption?: (newTx: Transaction, updatedPawn: PawnPledge) => void;
-  onPayUjrah?: (newTx: Transaction, updatedPawn: PawnPledge) => void;
+  onDeposit: (newTx: Transaction, updatedMember: Member, updatedAccount: SavingsAccount) => Promise<Transaction>;
+  onWithdraw: (newTx: Transaction, updatedMember: Member, updatedAccount: SavingsAccount) => Promise<Transaction>;
+  onPawnDisbursement: (newTx: Transaction, newPawn: PawnPledge) => Promise<Transaction>;
+  onCreditDisbursement: (newTx: Transaction, newCredit: CommodityFinancing) => Promise<Transaction>;
+  onPayInstallment: (newTx: Transaction, updatedCredit: CommodityFinancing) => Promise<Transaction>;
+  onPawnRedemption?: (newTx: Transaction, updatedPawn: PawnPledge) => Promise<Transaction>;
+  onPayUjrah?: (newTx: Transaction, updatedPawn: PawnPledge) => Promise<Transaction>;
   onAddMember?: (newMember: Member, newUser: UserType) => void;
   onUpdateMembers?: (members: Member[]) => void;
   onUpdateCurrentUser?: (user: UserType) => void;
@@ -95,6 +95,14 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
   onUpdateMembers,
   onUpdateCurrentUser,
 }) => {
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const [mutationPending, setMutationPending] = useState(false);
+  const runMutation = async <T,>(work: () => Promise<T>): Promise<{value: T} | null> => {
+    setMutationPending(true); setMutationError(null);
+    try { return { value: await work() }; }
+    catch (error: any) { setMutationError(error.message || 'Perubahan gagal disimpan.'); return null; }
+    finally { setMutationPending(false); }
+  };
   const [activeMainTab, setActiveMainTab] = useState<MainTab>('members');
   const [searchQuery, setSearchQuery] = useState('');
   const [memberFilter, setMemberFilter] = useState<'all' | 'savings' | 'pawn' | 'credit'>('all');
@@ -125,7 +133,7 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
     setTellerEditNotes(m.notes || '');
   };
 
-  const handleSaveMemberTeller = (e: React.FormEvent) => {
+  const handleSaveMemberTeller = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingMemberForTeller || !onUpdateMembers) return;
     const updated = members.map((m) => {
@@ -142,7 +150,7 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
       }
       return m;
     });
-    onUpdateMembers(updated);
+    if (!await runMutation(() => Promise.resolve(onUpdateMembers(updated)))) return;
     setEditingMemberForTeller(null);
     notificationService.broadcast({
       title: 'Profil Nasabah Diperbarui',
@@ -158,7 +166,7 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
   const [newMemNik, setNewMemNik] = useState('');
   const [newMemPhone, setNewMemPhone] = useState('');
   const [newMemEmail, setNewMemEmail] = useState('');
-  const [newMemPassword, setNewMemPassword] = useState('nasabah123');
+  const [newMemPassword, setNewMemPassword] = useState('');
   const [showNewMemPassword, setShowNewMemPassword] = useState(false);
   const [newMemAddress, setNewMemAddress] = useState('');
   const [newMemOccupation, setNewMemOccupation] = useState('');
@@ -171,34 +179,16 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
   const [tellerPassSuccess, setTellerPassSuccess] = useState<string | null>(null);
   const [tellerPassError, setTellerPassError] = useState<string | null>(null);
 
-  const handleChangeTellerPassword = (e: React.FormEvent) => {
+  const handleChangeTellerPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setTellerPassSuccess(null);
     setTellerPassError(null);
 
-    if (currentUser.password && tellerCurrentPassword && currentUser.password !== tellerCurrentPassword) {
-      setTellerPassError('Password saat ini tidak cocok.');
-      return;
+    if (tellerNewPassword !== tellerConfirmPassword) { setTellerPassError('Konfirmasi password tidak cocok.'); return; }
+    if (!await runMutation(() => ApiClient.changePassword(tellerCurrentPassword, tellerNewPassword))) {
+      setTellerPassError('Gagal mengubah password. Periksa password saat ini.'); return;
     }
-
-    if (tellerNewPassword.length < 6) {
-      setTellerPassError('Password baru minimal 6 karakter.');
-      return;
-    }
-
-    if (tellerNewPassword !== tellerConfirmPassword) {
-      setTellerPassError('Konfirmasi password tidak cocok dengan password baru.');
-      return;
-    }
-
-    const updatedUser: UserType = {
-      ...currentUser,
-      password: tellerNewPassword,
-    };
-
-    if (onUpdateCurrentUser) {
-      onUpdateCurrentUser(updatedUser);
-    }
+    window.location.reload();
 
     setTellerPassSuccess('Password akun Teller berhasil diperbarui!');
     setTellerCurrentPassword('');
@@ -395,7 +385,7 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
   };
 
   // Add Member Submission
-  const handleSaveAddMember = (e: React.FormEvent) => {
+  const handleSaveAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemFullName || !newMemNik || !newMemPhone) {
       alert('Mohon lengkapi Nama, NIK, dan Nomor HP / WhatsApp.');
@@ -403,7 +393,7 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
     }
 
     const nextNum = generateMemberNumber(members.length);
-    const finalPassword = newMemPassword || 'nasabah123';
+    const finalPassword = newMemPassword;
     const newMember: Member = {
       id: 'MBR-' + Date.now(),
       memberNumber: nextNum,
@@ -433,7 +423,7 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
     };
 
     if (onAddMember) {
-      onAddMember(newMember, newUser);
+      if (!await runMutation(() => Promise.resolve(onAddMember(newMember, newUser)))) return;
     }
 
     setShowAddMemberModal(false);
@@ -441,16 +431,16 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
     setNewMemNik('');
     setNewMemPhone('');
     setNewMemEmail('');
-    setNewMemPassword('nasabah123');
+    setNewMemPassword('');
     setNewMemAddress('');
     setNewMemOccupation('');
 
     // Open transaction modal immediately for new member deposit
-    handleOpenTransaction(newMember, 'setoran');
+    // Open the newly saved member from the refreshed list so the database number is used.
   };
 
   // Setoran Submission
-  const handleProcessDeposit = (e: React.FormEvent) => {
+  const handleProcessDeposit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedMemberForTx) return;
 
@@ -510,7 +500,8 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
       totalSavings: selectedMemberForTx.totalSavings + txAmount,
     };
 
-    onDeposit(newTx, updatedMem, updatedAcc);
+    const persisted = await runMutation(() => onDeposit(newTx, updatedMem, updatedAcc));
+    if (!persisted) return;
 
     notificationService.broadcast({
       title: 'Setoran Berhasil Diproses',
@@ -520,12 +511,12 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
     });
 
     setSelectedMemberForTx(null);
-    setActiveReceiptTx(newTx);
+    setActiveReceiptTx(persisted.value);
     setActiveReceiptMember(updatedMem);
   };
 
   // Penarikan Submission
-  const handleProcessWithdraw = (e: React.FormEvent) => {
+  const handleProcessWithdraw = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedMemberForTx) return;
 
@@ -574,7 +565,8 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
       totalSavings: Math.max(0, selectedMemberForTx.totalSavings - txAmount),
     };
 
-    onWithdraw(newTx, updatedMem, updatedAcc);
+    const persisted = await runMutation(() => onWithdraw(newTx, updatedMem, updatedAcc));
+    if (!persisted) return;
 
     notificationService.broadcast({
       title: 'Penarikan Saldo Berhasil',
@@ -584,12 +576,12 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
     });
 
     setSelectedMemberForTx(null);
-    setActiveReceiptTx(newTx);
+    setActiveReceiptTx(persisted.value);
     setActiveReceiptMember(updatedMem);
   };
 
   // Gadai Rahn Submission
-  const handleProcessPawn = (e: React.FormEvent) => {
+  const handleProcessPawn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedMemberForTx) return;
 
@@ -642,7 +634,8 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
       receiptCode: ref,
     };
 
-    onPawnDisbursement(newTx, newPawn);
+    const persisted = await runMutation(() => onPawnDisbursement(newTx, newPawn));
+    if (!persisted) return;
 
     notificationService.broadcast({
       title: 'Pencairan Gadai Syariah Berhasil',
@@ -652,12 +645,12 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
     });
 
     setSelectedMemberForTx(null);
-    setActiveReceiptTx(newTx);
+    setActiveReceiptTx(persisted.value);
     setActiveReceiptMember(selectedMemberForTx);
   };
 
   // Kredit Murabahah Submission
-  const handleProcessCredit = (e: React.FormEvent) => {
+  const handleProcessCredit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedMemberForTx) return;
 
@@ -721,7 +714,8 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
       receiptCode: ref,
     };
 
-    onCreditDisbursement(newTx, newCredit);
+    const persisted = await runMutation(() => onCreditDisbursement(newTx, newCredit));
+    if (!persisted) return;
 
     notificationService.broadcast({
       title: 'Pembiayaan Murabahah Dicairkan',
@@ -731,12 +725,12 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
     });
 
     setSelectedMemberForTx(null);
-    setActiveReceiptTx(newTx);
+    setActiveReceiptTx(persisted.value);
     setActiveReceiptMember(selectedMemberForTx);
   };
 
   // Bayar Angsuran Submission
-  const handleProcessPayInstallment = (e: React.FormEvent) => {
+  const handleProcessPayInstallment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedMemberForTx) return;
 
@@ -791,7 +785,8 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
       receiptCode: ref,
     };
 
-    onPayInstallment(newTx, updatedCredit);
+    const persisted = await runMutation(() => onPayInstallment(newTx, updatedCredit));
+    if (!persisted) return;
 
     notificationService.broadcast({
       title: 'Pembayaran Angsuran Berhasil',
@@ -801,12 +796,12 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
     });
 
     setSelectedMemberForTx(null);
-    setActiveReceiptTx(newTx);
+    setActiveReceiptTx(persisted.value);
     setActiveReceiptMember(selectedMemberForTx);
   };
 
   // Tebus Gadai (Pelunasan Rahn)
-  const handleProcessPawnRedeem = (pawn: PawnPledge) => {
+  const handleProcessPawnRedeem = async (pawn: PawnPledge) => {
     if (!selectedMemberForTx) return;
     const ref = generateReferenceNumber('RDM');
     const updatedPawn: PawnPledge = {
@@ -832,9 +827,9 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
       receiptCode: ref,
     };
 
-    if (onPawnRedemption) {
-      onPawnRedemption(newTx, updatedPawn);
-    }
+    if (!onPawnRedemption) return;
+    const persisted = await runMutation(() => onPawnRedemption(newTx, updatedPawn));
+    if (!persisted) return;
 
     notificationService.broadcast({
       title: 'Penebusan Gadai Syariah Berhasil',
@@ -844,12 +839,12 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
     });
 
     setSelectedMemberForTx(null);
-    setActiveReceiptTx(newTx);
+    setActiveReceiptTx(persisted.value);
     setActiveReceiptMember(selectedMemberForTx);
   };
 
   // Bayar Ujrah Gadai Bulanan
-  const handleProcessPawnUjrah = (pawn: PawnPledge) => {
+  const handleProcessPawnUjrah = async (pawn: PawnPledge) => {
     if (!selectedMemberForTx) return;
     const ref = generateReferenceNumber('UJR');
     const updatedPawn: PawnPledge = {
@@ -875,9 +870,9 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
       receiptCode: ref,
     };
 
-    if (onPayUjrah) {
-      onPayUjrah(newTx, updatedPawn);
-    }
+    if (!onPayUjrah) return;
+    const persisted = await runMutation(() => onPayUjrah(newTx, updatedPawn));
+    if (!persisted) return;
 
     notificationService.broadcast({
       title: 'Pembayaran Ujrah Rahn Berhasil',
@@ -887,7 +882,7 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
     });
 
     setSelectedMemberForTx(null);
-    setActiveReceiptTx(newTx);
+    setActiveReceiptTx(persisted.value);
     setActiveReceiptMember(selectedMemberForTx);
   };
 
@@ -899,6 +894,9 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
   };
 
   return (
+    <div>
+      {mutationError && <div role="alert" className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] max-w-lg rounded-lg bg-rose-50 border border-rose-300 shadow-xl p-3 text-rose-800">{mutationError}</div>}
+      {mutationPending && <div role="status" className="fixed top-4 right-4 z-[100] rounded-lg bg-white shadow p-3 text-emerald-800">Menyimpan perubahan...</div>}
     <div className="space-y-6">
       {/* Top Banner Card */}
       <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-emerald-950 text-white p-6 rounded-3xl shadow-lg relative overflow-hidden">
@@ -1633,7 +1631,7 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
                     required
                     value={tellerNewPassword}
                     onChange={(e) => setTellerNewPassword(e.target.value)}
-                    placeholder="Minimal 6 karakter"
+                    placeholder="Minimal 8 karakter"
                     className="w-full pl-3 pr-10 py-2.5 text-xs font-mono border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-hidden"
                   />
                 </div>
@@ -2763,9 +2761,10 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
                   <input
                     type={showNewMemPassword ? 'text' : 'password'}
                     required
+                    minLength={8}
                     value={newMemPassword}
                     onChange={(e) => setNewMemPassword(e.target.value)}
-                    placeholder="Minimal 6 karakter"
+                    placeholder="Minimal 8 karakter"
                     className="w-full pl-3 pr-10 py-2 text-xs font-mono border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-hidden"
                   />
                   <button
@@ -2949,6 +2948,7 @@ export const TellerDashboard: React.FC<TellerDashboardProps> = ({
           }}
         />
       )}
+    </div>
     </div>
   );
 };

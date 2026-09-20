@@ -32,7 +32,7 @@ class SavingsAccount extends Model
 
     public function product()
     {
-        return $this->belongsTo(SavingsProduct::class, 'product_id');
+        return $this->belongsTo(SavingsProduct::class, 'product_id')->withTrashed();
     }
 
     public function transactions()

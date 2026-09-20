@@ -18,7 +18,12 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
         '/api/v1': {
-          target: 'https://api.simpananku.my.id',
+          target: process.env.VITE_DEV_API_PROXY_TARGET || 'http://127.0.0.1:8000',
+          changeOrigin: true,
+          secure: true,
+        },
+        '/sanctum': {
+          target: process.env.VITE_DEV_API_PROXY_TARGET || 'http://127.0.0.1:8000',
           changeOrigin: true,
           secure: true,
         },

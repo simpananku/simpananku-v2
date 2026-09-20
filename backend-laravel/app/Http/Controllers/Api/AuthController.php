@@ -10,6 +10,7 @@ use App\Models\SavingsAccount;
 use App\Models\Notification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -32,17 +33,20 @@ class AuthController extends Controller
             ->first();
 
         if (! $user || ! Hash::check($validated['password'], $user->password)) {
-            // Also check plaintext password for initial seeded demo compatibility
-            if (! $user || $user->password !== $validated['password']) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Kombinasi email/nomor anggota dan kata sandi tidak cocok.',
-                ], 401);
-            }
+            return response()->json([
+                'success' => false,
+                'message' => 'Kombinasi email/nomor anggota dan kata sandi tidak cocok.',
+            ], 401);
         }
 
-        // Generate Sanctum Bearer Token
-        $token = $user->createToken('simpananku_auth_token')->plainTextToken;
+        // Browser clients use Laravel's HttpOnly session cookie. API clients may use a bearer token.
+        if ($request->hasSession()) {
+            Auth::guard('web')->login($user);
+            $request->session()->regenerate();
+            $token = null;
+        } else {
+            $token = $user->createToken('simpananku_auth_token', ['*'], now()->addHours(12))->plainTextToken;
+        }
 
         $memberData = null;
         if ($user->role === 'nasabah' && $user->member_id) {
@@ -96,12 +100,37 @@ class AuthController extends Controller
      */
     public function logout(Request $request)
     {
-        $request->user()->currentAccessToken()->delete();
+        if ($request->hasSession()) {
+            Auth::guard('web')->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        } else {
+            $request->user()->currentAccessToken()?->delete();
+        }
 
         return response()->json([
             'success' => true,
             'message' => 'Berhasil keluar dari sistem.',
         ]);
+    }
+
+    public function changePassword(Request $request)
+    {
+        $data = $request->validate([
+            'current_password' => 'required|string',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+        if (! Hash::check($data['current_password'], $request->user()->password)) {
+            throw ValidationException::withMessages(['current_password' => 'Kata sandi saat ini tidak sesuai.']);
+        }
+        $request->user()->update(['password' => $data['password']]);
+        $request->user()->tokens()->delete();
+        if ($request->hasSession()) {
+            Auth::guard('web')->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
+        return response()->json(['success' => true, 'message' => 'Kata sandi diperbarui. Silakan masuk kembali.']);
     }
 
     /**
@@ -117,6 +146,7 @@ class AuthController extends Controller
             'address' => 'required|string',
             'occupation' => 'nullable|string|max:100',
             'initial_deposit' => 'nullable|numeric|min:0',
+            'password' => 'nullable|string|min:8',
         ]);
 
         return DB::transaction(function () use ($validated) {
@@ -143,7 +173,7 @@ class AuthController extends Controller
             ]);
 
             // Buat User Akun Nasabah
-            $plainPassword = 'nasabah123';
+            $plainPassword = $validated['password'] ?? \Illuminate\Support\Str::password(16);
             $user = User::create([
                 'name' => $member->full_name,
                 'email' => $member->email ?: "{$memberNumber}@simpananku.local",

@@ -38,4 +38,9 @@ class PawnPledge extends Model
     {
         return $this->belongsTo(Member::class, 'member_number', 'member_number');
     }
+
+    public function transactions()
+    {
+        return $this->hasMany(Transaction::class, 'account_id', 'pawn_number');
+    }
 }

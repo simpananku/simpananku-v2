@@ -15,6 +15,7 @@ class TransactionController extends Controller
     public function index(Request $request)
     {
         $query = Transaction::orderBy('transaction_date', 'desc');
+        if ($request->user()->role === 'nasabah') $query->where('member_number', $request->user()->member_id);
 
         if ($request->filled('member_number')) {
             $query->where('member_number', $request->member_number);
@@ -26,7 +27,7 @@ class TransactionController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $query->paginate(20),
+            'data' => $query->get(),
         ]);
     }
 
@@ -48,6 +49,9 @@ class TransactionController extends Controller
                 ->firstOrFail();
 
             $member = Member::where('member_number', $account->member_number)->firstOrFail();
+            if ($account->status !== 'active' || ($account->balance == 0 && $validated['amount'] < $account->product->min_initial_deposit)) {
+                return response()->json(['success' => false, 'message' => 'Rekening tidak aktif atau setoran awal di bawah minimum produk.'], 422);
+            }
 
             // Tambah Saldo
             $newBalance = $account->balance + $validated['amount'];
@@ -164,9 +168,10 @@ class TransactionController extends Controller
     /**
      * Cetak Lembar Kwitansi Transaksi Sah.
      */
-    public function receipt($referenceNumber)
+    public function receipt(Request $request, $referenceNumber)
     {
         $tx = Transaction::where('reference_number', $referenceNumber)->firstOrFail();
+        abort_if($request->user()->role === 'nasabah' && $request->user()->member_id !== $tx->member_number, 403);
         $member = Member::where('member_number', $tx->member_number)->first();
 
         return response()->json([
