@@ -32,7 +32,7 @@ export interface Member {
   notes?: string;
 }
 
-export type ShariaAkad = 'wadiah' | 'mudharabah' | 'rahn' | 'murabahah' | 'ijarah';
+export type ShariaAkad = 'wadiah' | 'mudharabah' | 'rahn' | 'murabahah' | 'ijarah' | 'qardh';
 
 export interface SavingsProduct {
   id: string;
@@ -80,7 +80,7 @@ export interface Transaction {
   tellerName: string;
   createdAt: string;
   status: 'success' | 'pending' | 'failed';
-  paymentMethod: 'tunai' | 'transfer' | 'auto_debit';
+  paymentMethod: 'tunai' | 'transfer' | 'qris' | 'autodebet';
   receiptCode: string;
 }
 
@@ -151,4 +151,3 @@ export interface NotificationItem {
   targetMemberNumber?: string;
   actionUrl?: string;
 }
-

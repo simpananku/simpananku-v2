@@ -355,7 +355,26 @@ export class ApiClient {
   }
 
   public static async updateTransaction(tx: Transaction): Promise<void> {
-    await this.request(`/transactions/${tx.referenceNumber}`, { method: 'PUT', body: JSON.stringify({ description: tx.notes }) });
+    const types: Record<Transaction['type'], string> = {
+      setoran: 'setoran',
+      penarikan: 'penarikan',
+      gadai_pencairan: 'pencairan_gadai',
+      gadai_tebus: 'pelunasan_gadai',
+      gadai_ujrah: 'biaya_ujrah',
+      kredit_pencairan: 'pencairan_kredit',
+      kredit_angsuran: 'angsuran_kredit',
+    };
+    await this.request(`/transactions/${tx.referenceNumber}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        amount: tx.amount,
+        type: types[tx.type],
+        akad: tx.akad,
+        payment_method: tx.paymentMethod,
+        description: tx.notes,
+        status: tx.status === 'failed' ? 'cancelled' : tx.status,
+      }),
+    });
   }
 
   public static async deleteTransaction(ref: string): Promise<void> {
@@ -831,8 +850,8 @@ export class ApiClient {
       tellerId: t.teller_id ? String(t.teller_id) : (t.tellerId || 'TLR-01'),
       tellerName: t.teller_name || t.tellerName || 'Teller Syariah',
       createdAt: t.transaction_date || t.created_at || t.createdAt || new Date().toISOString(),
-      status: t.status || 'success',
-      paymentMethod: 'tunai',
+      status: t.status === 'cancelled' ? 'failed' : (t.status || 'success'),
+      paymentMethod: (t.payment_method === 'auto_debit' ? 'autodebet' : (t.payment_method || t.paymentMethod || 'tunai')),
       receiptCode: t.reference_number || t.receiptCode || `KWT-${Date.now()}`,
     };
   }

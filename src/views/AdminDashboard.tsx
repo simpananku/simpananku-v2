@@ -703,12 +703,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleSaveTx = async (e: React.FormEvent) => {
     e.preventDefault(); if (!editingTx) return;
-    const ok = await runMutation(() => ApiClient.updateTransaction({ ...editingTx, notes: txNotes, status: txStatus }));
+    const ok = await runMutation(() => ApiClient.updateTransaction({
+      ...editingTx,
+      amount: txAmount,
+      type: txType,
+      akad: txAkad,
+      paymentMethod: txPaymentMethod,
+      notes: txNotes,
+      status: txStatus,
+    }));
     if (ok) { setShowTxModal(false); setEditingTx(null); }
   };
 
   const handleDeleteTx = (txId: string) => {
-    if (!onUpdateTransactions) return;
     const target = transactions.find((t) => t.id === txId);
     if (!target) return;
     openDeleteModal(
@@ -3440,8 +3447,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               </div>
 
-              <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
-                Nominal {formatRupiah(editingTx.amount)}, jenis transaksi, dan status pembukuan tetap sesuai catatan asli. Koreksi di sini hanya mengubah keterangan.
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Nominal Mutasi (Rp):</label>
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  value={txAmount}
+                  onChange={(e) => setTxAmount(Number(e.target.value))}
+                  className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-hidden"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Jenis Transaksi:</label>
+                  <select value={txType} onChange={(e) => setTxType(e.target.value as Transaction['type'])} className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-hidden bg-white">
+                    <option value="setoran">Setoran Simpanan</option>
+                    <option value="penarikan">Penarikan Simpanan</option>
+                    <option value="gadai_pencairan">Pencairan Gadai</option>
+                    <option value="gadai_tebus">Tebus / Pelunasan Gadai</option>
+                    <option value="gadai_ujrah">Pembayaran Ujrah</option>
+                    <option value="kredit_pencairan">Pencairan Kredit</option>
+                    <option value="kredit_angsuran">Angsuran Murabahah</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Akad Syariah:</label>
+                  <select value={txAkad} onChange={(e) => setTxAkad(e.target.value as ShariaAkad)} className="w-full px-3 py-2 text-xs uppercase border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-hidden bg-white">
+                    <option value="wadiah">Wadi'ah</option>
+                    <option value="mudharabah">Mudharabah</option>
+                    <option value="murabahah">Murabahah</option>
+                    <option value="rahn">Rahn (Gadai)</option>
+                    <option value="ijarah">Ijarah</option>
+                    <option value="qardh">Qardh</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Metode Pembayaran:</label>
+                  <select value={txPaymentMethod} onChange={(e) => setTxPaymentMethod(e.target.value as Transaction['paymentMethod'])} className="w-full px-3 py-2 text-xs uppercase border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-hidden bg-white">
+                    <option value="tunai">Tunai Kas</option>
+                    <option value="transfer">Transfer Bank</option>
+                    <option value="qris">QRIS Syariah</option>
+                    <option value="autodebet">Autodebet</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Status:</label>
+                  <select value={txStatus} onChange={(e) => setTxStatus(e.target.value as Transaction['status'])} className="w-full px-3 py-2 text-xs font-bold uppercase border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-hidden bg-white">
+                    <option value="success">Sukses</option>
+                    <option value="pending">Pending</option>
+                    <option value="failed">Gagal</option>
+                  </select>
+                </div>
               </div>
 
               <div>

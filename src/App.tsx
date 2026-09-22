@@ -1,11 +1,12 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { User, Member, SavingsProduct, SavingsAccount, PawnPledge, CommodityFinancing, Transaction, NotificationItem } from './types';
 import { ApiClient } from './services/api';
 import { Navbar } from './components/Navbar';
 import { LoginView } from './views/LoginView';
-import { AdminDashboard } from './views/AdminDashboard';
-import { TellerDashboard } from './views/TellerDashboard';
-import { NasabahDashboard } from './views/NasabahDashboard';
+
+const AdminDashboard = lazy(() => import('./views/AdminDashboard').then((module) => ({ default: module.AdminDashboard })));
+const TellerDashboard = lazy(() => import('./views/TellerDashboard').then((module) => ({ default: module.TellerDashboard })));
+const NasabahDashboard = lazy(() => import('./views/NasabahDashboard').then((module) => ({ default: module.NasabahDashboard })));
 
 type AppData = {
   users: User[]; members: Member[]; products: SavingsProduct[]; accounts: SavingsAccount[];
@@ -109,6 +110,7 @@ export default function App() {
     <main className="max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex-1">
       {loading && <p role="status" className="mb-3 text-sm text-emerald-800">Menyinkronkan data...</p>}
       {error && <div role="alert" className="mb-3 p-3 bg-rose-50 text-rose-800 rounded-lg">{error} <button onClick={() => refresh().catch(() => {})} className="underline">Coba lagi</button></div>}
+      <Suspense fallback={<p role="status" className="text-sm text-emerald-800">Menyiapkan dashboard...</p>}>
       {currentUser.role === 'admin' ? <AdminDashboard currentUser={currentUser} onUpdateCurrentUser={setCurrentUser}
         users={data.users} members={data.members} products={data.products} accounts={data.accounts} pawns={data.pawns}
         credits={data.credits} transactions={data.transactions} onUpdateUsers={() => {}} onUpdateMembers={updateMembers}
@@ -121,7 +123,9 @@ export default function App() {
         onPayInstallment={payInstallment} onAddMember={(m) => registerMember(m)} onUpdateMembers={updateMembers} />
       : currentMember ? <NasabahDashboard currentUser={currentUser} onUpdateCurrentUser={setCurrentUser} member={currentMember}
         accounts={data.accounts} transactions={data.transactions} pawns={data.pawns} credits={data.credits} onUpdateMember={() => {}} />
+      : loading ? <p role="status" className="text-sm text-emerald-800">Memuat data keanggotaan...</p>
       : <p>Data anggota tidak ditemukan. Hubungi administrator.</p>}
+      </Suspense>
     </main>
   </div>;
 }

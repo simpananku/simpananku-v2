@@ -15,11 +15,13 @@ class Transaction extends Model
         'member_number',
         'member_name',
         'type',
+        'akad',
         'amount',
         'balance_after',
         'description',
         'teller_name',
         'teller_id',
+        'payment_method',
         'status',
         'transaction_date',
     ];

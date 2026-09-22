@@ -7,6 +7,7 @@ use App\Models\CommodityFinancing;
 use App\Models\Member;
 use App\Models\PawnPledge;
 use App\Models\SavingsProduct;
+use App\Models\SavingsAccount;
 use App\Models\Transaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -113,20 +114,84 @@ class ManagementController extends Controller
 
     public function updateTransaction(Request $request, string $ref)
     {
-        $tx = Transaction::where('reference_number', $ref)->firstOrFail();
-        // Financial fields are immutable so balances and audit history remain consistent.
         $data = $request->validate([
             'description' => 'nullable|string',
+            'amount' => 'sometimes|required|numeric|min:1',
+            'type' => ['sometimes', Rule::in(['setoran', 'penarikan', 'pencairan_gadai', 'pelunasan_gadai', 'biaya_ujrah', 'pencairan_kredit', 'angsuran_kredit'])],
+            'akad' => ['sometimes', Rule::in(['wadiah', 'mudharabah', 'rahn', 'murabahah', 'ijarah', 'qardh'])],
+            'payment_method' => ['sometimes', Rule::in(['tunai', 'transfer', 'qris', 'autodebet'])],
+            'status' => ['sometimes', Rule::in(['success', 'pending', 'cancelled'])],
         ]);
-        $tx->update($data);
-        return response()->json(['success' => true, 'data' => $tx]);
+        return DB::transaction(function () use ($ref, $data) {
+            $tx = Transaction::where('reference_number', $ref)->lockForUpdate()->firstOrFail();
+            $oldStatus = $tx->status;
+            $newStatus = $data['status'] ?? $oldStatus;
+            $financialDataChanged = (isset($data['amount']) && (float) $data['amount'] !== (float) $tx->amount)
+                || (isset($data['type']) && $data['type'] !== $tx->type);
+
+            if ($oldStatus === 'success' && ($newStatus !== 'success' || $financialDataChanged)) {
+                $this->reverseTransactionEffect($tx);
+            }
+
+            $tx->fill($data);
+
+            if ($newStatus === 'success' && ($oldStatus !== 'success' || $financialDataChanged)) {
+                $this->applyTransactionEffect($tx);
+            }
+
+            $tx->save();
+            return response()->json(['success' => true, 'data' => $tx->fresh()]);
+        });
     }
 
     public function deleteTransaction(string $ref)
     {
-        $tx = Transaction::where('reference_number', $ref)->firstOrFail();
-        abort_if($tx->status === 'success', 422, 'Transaksi berhasil tidak dapat dihapus. Buat koreksi pembukuan yang sesuai.');
-        $tx->delete();
-        return response()->json(['success' => true]);
+        return DB::transaction(function () use ($ref) {
+            $tx = Transaction::where('reference_number', $ref)->lockForUpdate()->firstOrFail();
+            if ($tx->status === 'success') $this->reverseTransactionEffect($tx);
+            $tx->delete();
+            return response()->json(['success' => true]);
+        });
+    }
+
+    private function reverseTransactionEffect(Transaction $tx): void
+    {
+        $this->adjustTransactionEffect($tx, -1);
+    }
+
+    private function applyTransactionEffect(Transaction $tx): void
+    {
+        $this->adjustTransactionEffect($tx, 1);
+    }
+
+    private function adjustTransactionEffect(Transaction $tx, int $direction): void
+    {
+        $amount = (float) $tx->amount;
+        if (in_array($tx->type, ['setoran', 'penarikan'], true)) {
+            $account = SavingsAccount::where('account_number', $tx->account_id)->lockForUpdate()->firstOrFail();
+            $delta = $tx->type === 'setoran' ? $amount : -$amount;
+            $newBalance = (float) $account->balance + ($direction * $delta);
+            abort_if($newBalance < 0, 422, 'Koreksi transaksi membuat saldo rekening menjadi negatif.');
+            $account->update(['balance' => $newBalance]);
+            $account->member?->refreshTotalSavings();
+            return;
+        }
+
+        if ($tx->type === 'angsuran_kredit') {
+            $credit = CommodityFinancing::where('financing_number', $tx->account_id)->lockForUpdate()->firstOrFail();
+            $paid = max(0, (float) $credit->paid_amount + ($direction * $amount));
+            $remaining = max(0, (float) $credit->total_financing - $paid);
+            $credit->update([
+                'paid_amount' => $paid,
+                'remaining_amount' => $remaining,
+                'status' => $remaining <= 0 ? 'lunas' : 'berjalan',
+            ]);
+            return;
+        }
+
+        if ($tx->type === 'pelunasan_gadai') {
+            $pawn = PawnPledge::where('pawn_number', $tx->account_id)->lockForUpdate()->first();
+            if ($pawn) $pawn->update(['status' => $direction > 0 ? 'lunas' : 'aktif']);
+        }
     }
 }
